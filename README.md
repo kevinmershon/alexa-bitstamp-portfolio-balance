@@ -6,7 +6,7 @@ Dot, etc.).
 
 Dependencies
 --
-- Python 2.X (due to changed in HMAC implementation in PyAlgoTrade)
+- Python 2.X (due to alterations in HMAC implementation required by PyAlgoTrade)
 - PyAlgoTrade
 
 Installation & Configuration
