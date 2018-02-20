@@ -1,7 +1,8 @@
 #!/usr/bin/env python2
+import os
 
-# CONFIGURE THESE AS DESIRED
-client_id = "CLIENT_ID"
+# Configure in AWS LAMBDA settings or system environment
+client_id = os.environ["client_id"]
 pairs    = [
   {"name": "Bitcoin",      "ticker": "btcusd"},
   {"name": "Ethereum",     "ticker": "ethusd"},
@@ -9,100 +10,104 @@ pairs    = [
   {"name": "Ripple",       "ticker": "xrpusd"}
 ]
 api_keys = {
-  "btcusd": {"api_key": "API_KEY", "api_secret": "API_SECRET"},
-  "ethusd": {"api_key": "API_KEY", "api_secret": "API_SECRET"},
-  "bchusd": {"api_key": "API_KEY", "api_secret": "API_SECRET"},
-  "xrpusd": {"api_key": "API_KEY", "api_secret": "API_SECRET"}
+  "btcusd": {"api_key": os.environ["btc_api_key"], "api_secret": os.environ["btc_api_secret"]},
+  "ethusd": {"api_key": os.environ["eth_api_key"], "api_secret": os.environ["eth_api_secret"]},
+  "bchusd": {"api_key": os.environ["bch_api_key"], "api_secret": os.environ["bch_api_secret"]},
+  "xrpusd": {"api_key": os.environ["xrp_api_key"], "api_secret": os.environ["xrp_api_secret"]}
 }
 
 ################################################################################
 
-import threading
-import time
-from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
-import SocketServer
 import uuid
 import datetime
+import threading
 
 from pyalgotrade.bitstamp import httpclient
 from urllib import urlopen
 import json
 
-# function for getting Bitstamp balance for the specified account
-def get_balance(pair, api_key, api_secret):
-  cli = httpclient.HTTPClient(client_id, api_key.encode(), api_secret.encode())
-  url = "https://www.bitstamp.net/api/v2/balance/" + pair + "/"
-  jsonResponse = cli._post(url, {})
-  return httpclient.AccountBalance(jsonResponse).getDict()
 
-global summary
+# use CryptoWatch to read each coin's price data
+class priceThread(object):
+  def __init__(self, pair):
+    self.pair = pair
+    self.thread = threading.Thread(target=self.run, args=())
+    self.thread.daemon = True
+    self.thread.start()
+  def run(self):
+    pair = self.pair
 
-class BalanceUpdateThread(object):
-  def __init__(self, interval=60):
-    self.interval = interval
+    url = "https://api.cryptowat.ch/markets/bitstamp/" + pair["ticker"] + "/summary"
+    response = urlopen(url)
+    response_body = response.read().decode('utf-8')
+    response_json = json.loads(response_body)
 
-    thread = threading.Thread(target=self.run, args=())
-    thread.daemon = True
-    thread.start()
+    self.price = response_json["result"]["price"]
+    self.response = "%s is currently $%.2f." % (pair["name"], self.price["last"])
+  def join(self):
+    self.thread.join()
+
+
+# Use API credentials to get the current balance info
+class balanceThread(object):
+  def __init__(self, pair):
+    self.pair = pair
+    self.thread = threading.Thread(target=self.run, args=())
+    self.thread.daemon = True
+    self.thread.start()
+
+  # function for getting Bitstamp balance for the specified account
+  def get_balance(self, pair, api_key, api_secret):
+    cli = httpclient.HTTPClient(client_id, api_key.encode(), api_secret.encode())
+    url = "https://www.bitstamp.net/api/v2/balance/" + pair + "/"
+    jsonResponse = cli._post(url, {})
+    return httpclient.AccountBalance(jsonResponse).getDict()
 
   def run(self):
-    while True:
-      # use CryptoWatch to read each coin's price data
-      balance = 0.0
-      responses = []
-      for pair in pairs:
-        url = "https://api.cryptowat.ch/markets/bitstamp/" + pair["ticker"] + "/summary"
-        response = urlopen(url)
-        response_body = response.read().decode('utf-8')
-        response_json = json.loads(response_body)
+    pair = self.pair
 
-        price = response_json["result"]["price"]
-        responses.append("%s is currently $%.2f." % (pair["name"], price["last"]))
+    api_credentials = api_keys[pair["ticker"]]
+    results = self.get_balance(pair["ticker"], api_credentials["api_key"], api_credentials["api_secret"])
 
-        # Use API credentials to get the current balance info
-        api_credentials = api_keys[pair["ticker"]]
-        results = get_balance(pair["ticker"], api_credentials["api_key"], api_credentials["api_secret"])
-        usd_balance = float(results["usd_balance"])
-        coin_balance = float(results[str(pair["ticker"][0:3] + "_balance")])
-        balance = balance + usd_balance + (float(price["last"]) * coin_balance)
+    self.usd_balance = float(results["usd_balance"])
+    self.coin_balance = float(results[str(pair["ticker"][0:3] + "_balance")])
+  def join(self):
+    self.thread.join()
 
-      global summary
-      summary = "Your crypto portfolio is currently valued at $%.2f." % balance
-      print(summary)
-      time.sleep(self.interval)
 
-class S(BaseHTTPRequestHandler):
-  def _set_headers(self):
-    self.send_response(200)
-    self.send_header('Content-type', 'application/json')
-    self.end_headers()
+def lambda_fn(event, context):
+  threads = []
+  # kickoff background price and balance threads concurrently
+  for pair in pairs:
+    threads.append({
+      "pt": priceThread(pair),
+      "bt": balanceThread(pair)
+    })
 
-  def do_GET(self):
-    self._set_headers()
+  # collect price and balance information
+  balance = 0.0
+  for x in threads:
+    pt = x["pt"]
+    bt = x["bt"]
+    pt.join()
+    bt.join()
 
-    global summary
-    body_data = {
-      "uid": str(uuid.uuid4()),
-      "updateDate": str(datetime.datetime.now().replace(microsecond=0).isoformat())+".0Z",
-      "titleText": "Bitstamp Portfolio",
-      "mainText": summary
-    }
-    self.wfile.write(json.dumps(body_data))
+    balance = balance + bt.usd_balance + (float(pt.price["last"]) * bt.coin_balance)
 
-  def do_HEAD(self):
-    self._set_headers()
+  # prepare summary
+  summary = "Your crypto portfolio is currently valued at $%.2f." % balance
 
-def run(server_class=HTTPServer, handler_class=S, port=8081):
-  server_address = ('', port)
-  httpd = server_class(server_address, handler_class)
-  background = BalanceUpdateThread()
-  print 'Starting httpd...'
-  httpd.serve_forever()
-
-if __name__ == "__main__":
-  from sys import argv
-
-  if len(argv) == 2:
-    run(port=int(argv[1]))
-  else:
-    run()
+  # format results for Lambda
+  return {
+    "statusCode": 200,
+    "body": json.dumps({
+        "uid": str(uuid.uuid4()),
+        "updateDate": str(datetime.datetime.now().replace(microsecond=0).isoformat())+".0Z",
+        "titleText": "Bitstamp Portfolio",
+        "mainText": summary
+    }),
+    "headers": {
+      "content-type": "application/json"
+    },
+    "isBase64Encoded": False
+  }

@@ -11,32 +11,44 @@ Dependencies
 
 Installation & Configuration
 --
-1. Install PyAlgoTrade using pip 2.x on a server exposed to the internet:
+1. Install PyAlgoTrade into the project directory using pip 2.x:
 
   ```shell
-  pip install pyalgotrade
+  pip install pyalgotrade -t ./
   ```
 
-2. Set up a reverse proxy in Nginx or Apache. SSL *must* be enabled for Alexa's
-   API to talk to the script. Use any port over 1024 that you want. Default is
-   8081.
+2. Install into AWS Lambda as a function with the following environment
+   variables defined: `client_id`, `btc_api_key`, `btc_api_secret`,
+   `eth_api_key`, `eth_api_secret`, `bch_api_key`, `bch_api_secret`,
+   `xrp_api_key`, `xrp_api_secret`.
 
-3. Edit `crypto_balance.py`'s configuration area at the top to specify your
-   account client ID and API keys for each crypto pair you trade in. If all your
-   coins are in one account you will still need to repeat the API key values for
-   each coin/trade pair.
+3. Configure API Gateway to use a LAMBDA_PROXY to the function with the
+   following Model configuration:
+
+   ```json
+   {
+     "$schema": "http://json-schema.org/draft-04/schema#",
+     "title": "AlexaFlashBriefingSkill",
+     "type": "object",
+     "properties": {
+       "mainText": {"type": "string"},
+       "uid": {"type": "string"},
+       "titleText": {"type": "string"},
+       "updateDate": {
+         "format": "date-time",
+         "type": "string",
+         "description": "Event
+           date-time"
+       }
+     }
+   }```
 
 Running the script
 --
 
-You should run the script in the background so it's always available.
+Once configured via API Gateway you should be able to hit the script via URL
 
-  ```shell
-  nohup ./crypto_balance.py 8081 &
-  ```
-
-Be sure to test that your script is now accessible from the outside world and
-that your connection is valid over HTTPS.
+Be sure to test that your script is accessible from the outside world.
 
 Connecting to your Alexa-compatible device
 --
