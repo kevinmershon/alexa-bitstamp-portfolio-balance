@@ -13,9 +13,9 @@ Installation & Configuration
 --
 1. Install PyAlgoTrade into the project directory using pip 2.x:
 
-  ```shell
-  pip install pyalgotrade -t ./
-  ```
+   ```shell
+   pip install pyalgotrade -t ./
+   ```
 
 2. Install into AWS Lambda as a function with the following environment
    variables defined: `client_id`, `btc_api_key`, `btc_api_secret`,
@@ -41,7 +41,8 @@ Installation & Configuration
            date-time"
        }
      }
-   }```
+   }
+   ```
 
 Running the script
 --
